@@ -1,0 +1,529 @@
+// import { User } from "../entities/User";
+// import { Role } from "../entities/Role";
+// import { NotFoundError, AuthorizationError, ValidationError } from "../utils/errors";
+// import { AppDataSource } from "../dataSource";
+// import { CreateUserInput, UpdateUserInput } from "../types";
+// import { Repository } from "typeorm";
+
+// export class UserService {
+//     private userRepository: Repository<User>;
+//     private roleRepository: Repository<Role>;
+  
+//     constructor() {
+//       this.userRepository = AppDataSource.getRepository(User);
+//       this.roleRepository = AppDataSource.getRepository(Role);
+//     }
+
+//   async getAllUsers(): Promise<User[]> {
+//     try {
+//       return await this.userRepository.find({ relations: ["role"] });
+//     } catch (error) {
+//       console.error("Error fetching users:", error);
+//       throw new Error("Failed to fetch users");
+//     }
+//   }
+
+//   async getUserById(id: number): Promise<User | null> {
+//     try {
+//       const user = await this.userRepository.findOne({ where: { id }, relations: ["role"] });
+//       if (!user) {
+//         throw new NotFoundError(`User with id ${id} not found`);
+//       }
+//       return user;
+//     } catch (error) {
+//       console.error(`Error fetching user with id ${id}:`, error);
+//       if (error instanceof NotFoundError) {
+//         throw error;
+//       }
+//       throw new Error("Failed to fetch user");
+//     }
+//   }
+
+//   async createUser(data: CreateUserInput): Promise<User> {
+//     try {
+//       const existingUser = await this.userRepository.findOne({ where: { email: data.email } });
+//       if (existingUser) {
+//         throw new ValidationError("User with this email already exists");
+//       }
+
+//       const role = await this.roleRepository.findOneBy({ id: data.roleId });
+//       if (!role) {
+//         throw new NotFoundError(`Role with id ${data.roleId} not found`);
+//       }
+
+//       const user = this.userRepository.create({ ...data, role });
+//       return await this.userRepository.save(user);
+//     } catch (error) {
+//       console.error("Error creating user:", error);
+//       if (error instanceof NotFoundError || error instanceof ValidationError) {
+//         throw error;
+//       }
+//       throw new Error("Failed to create user");
+//     }
+//   }
+
+//   async updateUser(id: number, data: UpdateUserInput): Promise<User> {
+//     try {
+//       const user = await this.userRepository.findOne({ where: { id } });
+//       if (!user) {
+//         throw new NotFoundError(`User with id ${id} not found`);
+//       }
+
+//       if (data.roleId) {
+//         const role = await this.roleRepository.findOne({ where: {id: data.roleId} });
+//         if (!role) {
+//           throw new NotFoundError(`Role with id ${data.roleId} not found`);
+//         }
+//         user.role = role;
+//       }
+
+//       Object.assign(user, data);
+//       return await this.userRepository.save(user);
+//     } catch (error) {
+//       console.error(`Error updating user with id ${id}:`, error);
+//       if (error instanceof NotFoundError) {
+//         throw error;
+//       }
+//       throw new Error("Failed to update user");
+//     }
+//   }
+
+//   async deleteUser(id: number): Promise<boolean> {
+//     try {
+//       const user = await this.userRepository.findOne({ where: { id } });
+//       if (!user) {
+//         throw new NotFoundError(`User with id ${id} not found`);
+//       }
+//       await this.userRepository.remove(user);
+//       return true;
+//     } catch (error) {
+//       console.error(`Error deleting user with id ${id}:`, error);
+//       if (error instanceof NotFoundError) {
+//         throw error;
+//       }
+//       throw new Error("Failed to delete user");
+//     }
+//   }
+
+//   async getCurrentUser(context: any): Promise<User> {
+//     try {
+//       if (!context.user) {
+//         throw new AuthorizationError("Not authenticated");
+//       }
+//       const user = await this.userRepository.findOne({ 
+//         where: { id: context.user.id }, 
+//         relations: ["role"] 
+//       });
+//       if (!user) {
+//         throw new NotFoundError("User not found");
+//       }
+//       return user;
+//     } catch (error) {
+//       console.error("Error fetching current user:", error);
+//       if (error instanceof AuthorizationError || error instanceof NotFoundError) {
+//         throw error;
+//       }
+//       throw new Error("Failed to fetch current user");
+//     }
+//   }
+// }
+
+
+// // src/services/OAuthService.ts
+// import { OAuth2Client } from "google-auth-library";
+// import { User } from "../entities/User";
+// import { Role } from "../entities/Role";
+// import { generateToken } from "./AuthService";
+// import { AppDataSource } from "../dataSource";
+
+// const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+// export const verifyGoogleToken = async (token: string) => {
+//   const ticket = await client.verifyIdToken({
+//     idToken: token,
+//     audience: process.env.GOOGLE_CLIENT_ID,
+//   });
+//   return ticket.getPayload();
+// };
+
+// export const googleLogin = async (token: string) => {
+//   const payload = await verifyGoogleToken(token);
+//   if (!payload) throw new Error("Invalid Google token");
+
+//   const { email, name } = payload;
+//   const userRepository = AppDataSource.getRepository(User);
+//   const roleRepository = AppDataSource.getRepository(Role);
+
+//   let user = await userRepository.findOne({ where: { email }, relations: ["role"] });
+
+//   if (!user) {
+//     const defaultRole = await roleRepository.findOne({ where: { name: "User" } });
+//     if (!defaultRole) throw new Error("Default role not found");
+
+//     user = userRepository.create({
+//       email,
+//       name,
+//       role: defaultRole,
+//       password: "", // Set a blank password for OAuth users
+//     });
+//     await userRepository.save(user);
+//   }
+
+//   const authToken = generateToken(user);
+//   return { token: authToken, user };
+// };
+
+
+
+// import { Resolver, Query, Mutation, Arg, Authorized, Ctx, ID, UseMiddleware } from "type-graphql";
+// import { User } from "../entities/User";
+// import { Role } from "../entities/Role";
+// import { NotFoundError, AuthorizationError, ValidationError } from "../utils/errors";
+// import { AppDataSource } from "../dataSource";
+// import { CreateUserInput, UpdateUserInput } from "../types";
+// import { isAuth } from "../middlewares/isAuth";
+
+// @Resolver(User)
+// export class UserResolver {
+//   private  userRepository = AppDataSource.getRepository(User);
+//   private roleRepository = AppDataSource.getRepository(Role);
+//   @Query(() => [User])
+//   async users(): Promise<User[]> {
+//     try {
+//       const userRepository = AppDataSource.getRepository(User);
+//       return await userRepository.find({ relations: ["role"] });
+//     } catch (error) {
+//       console.error("Error fetching users:", error);
+//       throw new Error("Failed to fetch users");
+//     }
+//   }
+
+//   @Query(() => User, { nullable: true })
+//   async user(@Arg("id", () => ID) id: number): Promise<User | null> {
+//     try {
+//       const userRepository = AppDataSource.getRepository(User);
+//       const user = await userRepository.findOne({ where: { id }, relations: ["role"] });
+//       if (!user) {
+//         throw new NotFoundError(`User with id ${id} not found`);
+//       }
+//       return user;
+//     } catch (error) {
+//       console.error(`Error fetching user with id ${id}:`, error);
+//       if (error instanceof NotFoundError) {
+//         throw error;
+//       }
+//       throw new Error("Failed to fetch user");
+//     }
+//   }
+
+//   @UseMiddleware(isAuth)
+//   @Authorized(["ADMIN"])
+//   @Mutation(() => User)
+//   async createUser(@Arg("data") data: CreateUserInput): Promise<User> {
+//     try {
+     
+
+      
+//       const existingUser = await this.userRepository.findOne({ where: { email:data.email } });
+//       if (existingUser) {
+//         throw new ValidationError("User with this email already exists");
+//       }
+
+//       const role = await this.roleRepository.findOneBy({ id: data.roleId });
+//       if (!role) {
+//         throw new NotFoundError(`Role with id ${data.roleId} not found`);
+//       }
+
+//       const user = this.userRepository.create({ ...data, role });
+//       return await this.userRepository.save(user);
+//     } catch (error) {
+//       console.error("Error creating user:", error);
+//       if (error instanceof NotFoundError) {
+//         throw error;
+//       }
+//       throw new Error("Failed to create user, an error occurred while creating the user");
+//     }
+//   }
+
+//   @UseMiddleware(isAuth)
+//   @Authorized(["ADMIN"])
+//   @Mutation(() => User)
+//   async updateUser(
+//     @Arg("id", () => ID) id: number,
+//     @Arg("data") data: UpdateUserInput
+//   ): Promise<User> {
+//     try {
+    
+//       const user = await this.userRepository.findOne({ where: { id } });
+//       if (!user) {
+//         throw new NotFoundError(`User with id ${id} not found`);
+//       }
+
+//       if (data.roleId) {
+//         const role = await this.roleRepository.findOne({ where: {id: data.roleId} });
+//         if (!role) {
+//           throw new NotFoundError(`Role with id ${data.roleId} not found`);
+//         }
+//         user.role = role;
+//       }
+
+//       Object.assign(user, data);
+//       return await this.userRepository.save(user);
+//     } catch (error) {
+//       console.error(`Error updating user with id ${id}:`, error);
+//       if (error instanceof NotFoundError) {
+//         throw error;
+//       }
+//       throw new Error("Failed to update user");
+//     }
+//   }
+
+//   @Authorized(["ADMIN"])
+//   @Mutation(() => Boolean)
+//   async deleteUser(@Arg("id", () => ID) id: number): Promise<boolean> {
+//     try {
+//       const user = await this.userRepository.findOne({ where: { id } });
+//       if (!user) {
+//         throw new NotFoundError(`User with id ${id} not found`);
+//       }
+//       await this.userRepository.remove(user);
+//       return true;
+//     } catch (error) {
+//       console.error(`Error deleting user with id ${id}:`, error);
+//       if (error instanceof NotFoundError) {
+//         throw error;
+//       }
+//       throw new Error("Failed to delete user");
+//     }
+//   }
+
+//   @Query(() => User)
+//   async me(@Ctx() context: any): Promise<User> {
+//     try {
+//       if (!context.user) {
+//         throw new AuthorizationError("Not authenticated");
+//       }
+//       const userRepository = AppDataSource.getRepository(User);
+//       const user = await userRepository.findOne({ 
+//         where: { id: context.user.id }, 
+//         relations: ["role"] 
+//       });
+//       if (!user) {
+//         throw new NotFoundError("User not found");
+//       }
+//       return user;
+//     } catch (error) {
+//       console.error("Error fetching current user:", error);
+//       if (error instanceof AuthorizationError || error instanceof NotFoundError) {
+//         throw error;
+//       }
+//       throw new Error("Failed to fetch current user");
+//     }
+//   }
+// }
+
+
+// import { Resolver, Query, Mutation, Arg, Authorized, ID } from "type-graphql";
+// import { Role } from "../entities/Role";
+// import { NotFoundError, ValidationError } from "../utils/errors";
+// import { AppDataSource } from "../dataSource";
+// import { CreateRoleInput, UpdateRoleInput } from "../types";
+
+// @Resolver(Role)
+// export class RoleResolver {
+//   @Query(() => [Role])
+//   async roles(): Promise<Role[]> {
+//     try {
+//       const roleRepository = AppDataSource.getRepository(Role);
+//       return await roleRepository.find();
+//     } catch (error) {
+//       console.error("Error fetching roles:", error);
+//       throw new Error("Failed to fetch roles");
+//     }
+//   }
+
+//   @Query(() => Role, { nullable: true })
+//   async role(@Arg("id", () => ID) id: number): Promise<Role | null> {
+//     try {
+//       const roleRepository = AppDataSource.getRepository(Role);
+//       const role = await roleRepository.findOne({ where: { id } });
+
+//       if (!role) {
+//         throw new NotFoundError(`Role with id ${id} not found`);
+//       }
+//       return role;
+//     } catch (error) {
+//       console.error(`Error fetching role with id ${id}:`, error);
+//       if (error instanceof NotFoundError) {
+//         throw error;
+//       }
+//       throw new Error("Failed to fetch role");
+//     }
+//   }
+
+//   @Authorized(["ADMIN"])
+//   @Mutation(() => Role)
+//   async createRole(@Arg("data") data: CreateRoleInput): Promise<Role> {
+//     try {
+//       const roleRepository = AppDataSource.getRepository(Role);
+//       const existingRole = await roleRepository.findOne({ where: { name: data.name } });
+//       if (existingRole) {
+//         throw new ValidationError(`Role with name ${data.name} already exists`);
+//       }
+//       const role = roleRepository.create(data);
+//       return await roleRepository.save(role);
+//     } catch (error) {
+//       console.error("Error creating role:", error);
+//       if (error instanceof ValidationError) {
+//         throw error;
+//       }
+//       throw new Error("Failed to create role");
+//     }
+//   }
+
+//   @Authorized(["ADMIN"])
+//   @Mutation(() => Role)
+//   async updateRole(
+//     @Arg("id", () => ID) id: number,
+//     @Arg("data") data: UpdateRoleInput
+//   ): Promise<Role> {
+//     try {
+//       const roleRepository = AppDataSource.getRepository(Role);
+//       const role = await roleRepository.findOne({ where: { id } });
+//       if (!role) {
+//         throw new NotFoundError(`Role with id ${id} not found`);
+//       }
+//       Object.assign(role, data);
+//       return await roleRepository.save(role);
+//     } catch (error) {
+//       console.error(`Error updating role with id ${id}:`, error);
+//       if (error instanceof NotFoundError) {
+//         throw error;
+//       }
+//       throw new Error("Failed to update role");
+//     }
+//   }
+
+//   @Authorized(["ADMIN"])
+//   @Mutation(() => Boolean)
+//   async deleteRole(@Arg("id", () => ID) id: number): Promise<boolean> {
+//     try {
+//       const roleRepository = AppDataSource.getRepository(Role);
+//       const role = await roleRepository.findOne({ where: { id } });
+//       if (!role) {
+//         throw new NotFoundError(`Role with id ${id} not found`);
+//       }
+//       await roleRepository.remove(role);
+//       return true;
+//     } catch (error) {
+//       console.error(`Error deleting role with id ${id}:`, error);
+//       if (error instanceof NotFoundError) {
+//         throw error;
+//       }
+//       throw new Error("Failed to delete role");
+//     }
+//   }
+// }
+
+
+// import { Resolver, Query, Mutation, Arg, Authorized, ID } from "type-graphql";
+// import { Role } from "../entities/Role";
+// import { NotFoundError, ValidationError } from "../utils/errors";
+// import { AppDataSource } from "../dataSource";
+// import { CreateRoleInput, UpdateRoleInput } from "../types";
+
+// @Resolver(Role)
+// export class RoleResolver {
+//   @Query(() => [Role])
+//   async roles(): Promise<Role[]> {
+//     try {
+//       const roleRepository = AppDataSource.getRepository(Role);
+//       return await roleRepository.find();
+//     } catch (error) {
+//       console.error("Error fetching roles:", error);
+//       throw new Error("Failed to fetch roles");
+//     }
+//   }
+
+//   @Query(() => Role, { nullable: true })
+//   async role(@Arg("id", () => ID) id: number): Promise<Role | null> {
+//     try {
+//       const roleRepository = AppDataSource.getRepository(Role);
+//       const role = await roleRepository.findOne({ where: { id } });
+
+//       if (!role) {
+//         throw new NotFoundError(`Role with id ${id} not found`);
+//       }
+//       return role;
+//     } catch (error) {
+//       console.error(`Error fetching role with id ${id}:`, error);
+//       if (error instanceof NotFoundError) {
+//         throw error;
+//       }
+//       throw new Error("Failed to fetch role");
+//     }
+//   }
+
+//   @Authorized(["ADMIN"])
+//   @Mutation(() => Role)
+//   async createRole(@Arg("data") data: CreateRoleInput): Promise<Role> {
+//     try {
+//       const roleRepository = AppDataSource.getRepository(Role);
+//       const existingRole = await roleRepository.findOne({ where: { name: data.name } });
+//       if (existingRole) {
+//         throw new ValidationError(`Role with name ${data.name} already exists`);
+//       }
+//       const role = roleRepository.create(data);
+//       return await roleRepository.save(role);
+//     } catch (error) {
+//       console.error("Error creating role:", error);
+//       if (error instanceof ValidationError) {
+//         throw error;
+//       }
+//       throw new Error("Failed to create role");
+//     }
+//   }
+
+//   @Authorized(["ADMIN"])
+//   @Mutation(() => Role)
+//   async updateRole(
+//     @Arg("id", () => ID) id: number,
+//     @Arg("data") data: UpdateRoleInput
+//   ): Promise<Role> {
+//     try {
+//       const roleRepository = AppDataSource.getRepository(Role);
+//       const role = await roleRepository.findOne({ where: { id } });
+//       if (!role) {
+//         throw new NotFoundError(`Role with id ${id} not found`);
+//       }
+//       Object.assign(role, data);
+//       return await roleRepository.save(role);
+//     } catch (error) {
+//       console.error(`Error updating role with id ${id}:`, error);
+//       if (error instanceof NotFoundError) {
+//         throw error;
+//       }
+//       throw new Error("Failed to update role");
+//     }
+//   }
+
+//   @Authorized(["ADMIN"])
+//   @Mutation(() => Boolean)
+//   async deleteRole(@Arg("id", () => ID) id: number): Promise<boolean> {
+//     try {
+//       const roleRepository = AppDataSource.getRepository(Role);
+//       const role = await roleRepository.findOne({ where: { id } });
+//       if (!role) {
+//         throw new NotFoundError(`Role with id ${id} not found`);
+//       }
+//       await roleRepository.remove(role);
+//       return true;
+//     } catch (error) {
+//       console.error(`Error deleting role with id ${id}:`, error);
+//       if (error instanceof NotFoundError) {
+//         throw error;
+//       }
+//       throw new Error("Failed to delete role");
+//     }
+//   }
+// }
